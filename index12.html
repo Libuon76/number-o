@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+
+    <title>数字当てゲーム</title>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1a1a2e"> <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* グローバルなフォント設定と背景色 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a2e; /* ダークネイビーの背景 */
+            color: #e0e0e0; /* 明るいテキスト */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        /* ボタンのホバーエフェクト */
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        /* メッセージエリアのスタイル */
+        #messageArea {
+            min-height: 4.5rem; /* メッセージを安定させるための最小高さ */
+            line-height: 1.5;
+        }
+        /* 秘密の数字入力エリアを中央に配置 */
+        #secretSetterArea input {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="space-y-6 flex flex-col items-center">
+        <h1 class="text-5xl font-extrabold text-indigo-400">数字当てPWAゲーム</h1>
+        <p class="text-center max-w-lg text-gray-300">
+            秘密の数字を予想してね！設定された数字を当てるまで、予想を繰り返します。正解までの試行回数を競いましょう。
+        </p>
+
+        <div class="text-center p-8 bg-[#303450] rounded-2xl shadow-2xl border border-indigo-500/50 space-y-6 max-w-lg w-full" id="mainGameArea">
+
+            <div id="secretSetterArea" class="space-y-4">
+                <h2 class="text-2xl font-bold text-white">ゲーム設定 (1〜100)</h2>
+                <input type="number" id="secretNumberInput" class="w-full p-3 bg-[#4a4f78] text-white rounded-lg border border-indigo-500/50 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 text-2xl font-bold" placeholder="秘密の数字 (1〜100)" min="1" max="100">
+                <button id="setSecretButton" type="button" class="p-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/50 transition duration-300 btn-primary w-full">この数字を秘密にする</button>
+            </div>
+
+            <div id="guessInputArea" class="hidden space-y-4">
+                <div class="flex gap-4">
+                    <input type="number" id="guessField" class="flex-grow p-3 bg-[#4a4f78] text-white rounded-lg border border-indigo-500/50 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 text-2xl font-bold text-center" placeholder="予想 (1〜100)" min="1" max="100">
+                    <button id="submitGuess" type="submit" class="p-3 bg-green-600 text-white font-bold rounded-xl shadow-lg shadow-green-500/50 transition duration-300 btn-primary">予想を送信</button>
+                </div>
+            </div>
+
+            <div id="resultArea" class="space-y-4">
+                <div id="messageArea">
+                    <p class="text-lg font-semibold mb-2 text-white" id="lastResult">さあ、予想を入力してね！</p>
+                    <p class="text-base font-medium text-indigo-300" id="lowOrHi">現在の試行回数: 1</p>
+                </div>
+
+                <p class="text-sm text-gray-400 break-words" id="guesses">前回の予想:</p>
+            </div>
+
+            <div class="mt-6 hidden text-center" id="resetArea">
+                <button class="p-3 bg-pink-600 text-white font-bold rounded-xl shadow-lg shadow-pink-500/50 transition duration-300 btn-primary" id="resetButton" type="button">次のラウンドへ</button>
+            </div>
+        </div>
+        <div class="hidden text-center p-8 bg-[#303450] rounded-2xl shadow-2xl border border-green-500/50 space-y-8 max-w-lg w-full" id="finalResultArea">
+            <h2 class="text-4xl font-extrabold text-green-300" id="finalResultTitle"></h2>
+            <div class="text-left bg-[#4a4f78] p-6 rounded-lg space-y-3">
+                <p class="text-xl font-semibold text-white">🏆 総合結果:</p>
+                <p class="text-lg text-gray-300" id="totalRounds">合計ラウンド数: 0</p>
+                <p class="text-lg text-gray-300" id="totalAttempts">合計試行回数: 0</p>
+            </div>
+            <button class="p-3 bg-yellow-600 text-white font-bold rounded-xl shadow-lg shadow-yellow-500/50 transition duration-300 btn-primary w-full" id="newGameButton" type="button">新しいゲームを始める</button>
+        </div>
+        </div>
+
+    <script>
+        // PWA化のため、ここからService Worker登録コードを追加
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                // service-worker.jsという名前でファイルを登録
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('Service Worker registered: ', registration);
+                    })
+                    .catch(error => {
+                        console.log('Service Worker registration failed: ', error);
+                    });
+            });
+        }
+        // /PWA追加コード
+
+        // --- ここから既存のゲームロジック ---
+        // 秘密の数字
+        let secretNumber = 0;
+        // 試行回数
+        let guessCount = 1;
+        // 前回の予想
+        let guesses = [];
+        // ゲームの状態管理
+        let gameOver = false;
+        // ラウンド数と合計試行回数
+        let roundCount = 0;
+        let totalAttempts = 0;
+
+        // HTML要素の取得
+        const secretNumberInput = document.getElementById('secretNumberInput');
+        const setSecretButton = document.getElementById('setSecretButton');
+        const guessField = document.getElementById('guessField');
+        const submitGuess = document.getElementById('submitGuess');
+        const resetButton = document.getElementById('resetButton');
+        const newGameButton = document.getElementById('newGameButton');
+
+        // 表示エリア
+        const secretSetterArea = document.getElementById('secretSetterArea');
+        const guessInputArea = document.getElementById('guessInputArea');
+        const mainGameArea = document.getElementById('mainGameArea');
+        const finalResultArea = document.getElementById('finalResultArea');
+
+        const lastResult = document.getElementById('lastResult');
+        const lowOrHi = document.getElementById('lowOrHi');
+        const previousGuesses = document.getElementById('guesses');
+        const resetArea = document.getElementById('resetArea');
+        const finalResultTitle = document.getElementById('finalResultTitle');
+        const totalRounds = document.getElementById('totalRounds');
+        const totalAttemptsDisplay = document.getElementById('totalAttempts');
+
+        // ------------------------------------
+        // ゲームの開始 (秘密の数字設定)
+        // ------------------------------------
+        setSecretButton.addEventListener('click', setSecretNumber);
+
+        function setSecretNumber() {
+            const num = parseInt(secretNumberInput.value);
+
+            if (num < 1 || num > 100 || isNaN(num)) {
+                alert('秘密の数字は1から100の間の数字を入力してください。');
+                return;
+            }
+
+            secretNumber = num;
+            secretNumberInput.value = ''; // 入力欄をクリア
+
+            // 表示の切り替え
+            secretSetterArea.classList.add('hidden');
+            guessInputArea.classList.remove('hidden');
+            
+            // 初回表示メッセージ
+            lastResult.textContent = 'ゲームスタート！1から100で予想してね。';
+            lowOrHi.textContent = '現在の試行回数: 1';
+            previousGuesses.textContent = '前回の予想:';
+            
+            // 試行回数をリセット
+            guessCount = 1;
+            guesses = [];
+            gameOver = false;
+            roundCount++; // ラウンド開始
+        }
+
+
+        // ------------------------------------
+        // 予想の送信
+        // ------------------------------------
+        submitGuess.addEventListener('click', checkGuess);
+
+        function checkGuess() {
+            if (gameOver) return;
+
+            const userGuess = Number(guessField.value);
+
+            if (userGuess < 1 || userGuess > 100 || isNaN(userGuess)) {
+                alert('1から100の間の有効な数字を入力してください。');
+                guessField.value = '';
+                guessField.focus();
+                return;
+            }
+
+            guesses.push(userGuess);
+            previousGuesses.textContent = '前回の予想: ' + guesses.join(', ');
+            totalAttempts++; // 合計試行回数をカウント
+
+            if (userGuess === secretNumber) {
+                lastResult.textContent = '🎉 正解です！おめでとう！';
+                lastResult.classList.remove('text-white', 'text-yellow-400');
+                lastResult.classList.add('text-green-400');
+                lowOrHi.textContent = `試行回数: ${guessCount}回でクリア！`;
+                setGameOver();
+            } else {
+                lastResult.textContent = '間違いです！';
+                lastResult.classList.remove('text-white', 'text-green-400');
+                lastResult.classList.add('text-yellow-400');
+
+                if (userGuess < secretNumber) {
+                    lowOrHi.textContent = 'ヒント: もっと大きいよ！';
+                } else if (userGuess > secretNumber) {
+                    lowOrHi.textContent = 'ヒント: もっと小さいよ！';
+                }
+
+                guessCount++;
+                lowOrHi.textContent += ` / 現在の試行回数: ${guessCount}`;
+            }
+
+            guessField.value = '';
+            guessField.focus();
+        }
+
+        // ------------------------------------
+        // ゲームオーバー処理
+        // ------------------------------------
+        function setGameOver() {
+            gameOver = true;
+            guessField.disabled = true;
+            submitGuess.disabled = true;
+            resetArea.classList.remove('hidden');
+
+            // 5ラウンド終了でゲーム終了
+            if (roundCount >= 5) {
+                resetButton.textContent = 'ゲーム終了！結果を見る';
+                resetButton.removeEventListener('click', resetGame);
+                resetButton.addEventListener('click', showFinalResult);
+            } else {
+                // 5ラウンド未満なら次のラウンドへ
+                resetButton.textContent = '次のラウンドへ';
+                resetButton.removeEventListener('click', showFinalResult);
+                resetButton.addEventListener('click', resetGame);
+            }
+        }
+
+        // ------------------------------------
+        // ラウンドのリセット
+        // ------------------------------------
+        function resetGame() {
+            // ゲームの状態をリセット
+            guessCount = 1;
+            guesses = [];
+            gameOver = false;
+
+            // UIをリセット
+            lastResult.textContent = 'さあ、新しい秘密の数字を予想してね！';
+            lastResult.classList.remove('text-green-400', 'text-yellow-400');
+            lastResult.classList.add('text-white');
+            lowOrHi.textContent = '現在の試行回数: 1';
+            previousGuesses.textContent = '前回の予想:';
+
+            guessField.disabled = false;
+            submitGuess.disabled = false;
+            guessField.value = '';
+            guessField.focus();
+
+            resetArea.classList.add('hidden');
+            secretSetterArea.classList.remove('hidden');
+            guessInputArea.classList.add('hidden');
+
+            // 秘密の数字もリセット
+            secretNumber = 0;
+        }
+
+        // ------------------------------------
+        // 最終結果表示
+        // ------------------------------------
+        function showFinalResult() {
+            mainGameArea.classList.add('hidden');
+            finalResultArea.classList.remove('hidden');
+
+            finalResultTitle.textContent = '総合結果発表！';
+            totalRounds.textContent = `合計ラウンド数: ${roundCount}`;
+            totalAttemptsDisplay.textContent = `合計試行回数: ${totalAttempts}回`;
+
+            // 新しいゲーム開始ボタンにリスナーを設定
+            newGameButton.addEventListener('click', startNewGame);
+        }
+
+        // ------------------------------------
+        // 新しいゲームを最初から開始
+        // ------------------------------------
+        function startNewGame() {
+            // 全ての総合情報をリセット
+            roundCount = 0;
+            totalAttempts = 0;
+
+            // UIをリセット
+            finalResultArea.classList.add('hidden');
+            mainGameArea.classList.remove('hidden');
+            
+            // ラウンドのリセット処理を実行
+            resetGame();
+
+            // 新しいゲーム開始ボタンのリスナーを一度削除
+            newGameButton.removeEventListener('click', startNewGame);
+
+            // リセットボタンのリスナーも初期状態に戻す
+            resetButton.removeEventListener('click', showFinalResult);
+            resetButton.addEventListener('click', resetGame);
+        }
+
+        // ページロード時にリセット処理を実行し、初期状態にする
+        window.onload = function() {
+            startNewGame();
+        };
+
+    </script>
+</body>
+</html>
